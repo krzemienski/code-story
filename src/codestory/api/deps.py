@@ -186,8 +186,20 @@ async def get_api_key(
     return x_api_key
 
 
-# Type aliases for dependency injection
+# Type aliases for dependency injection (legacy SQLAlchemy-based)
 CurrentUser = Annotated[User, Depends(get_current_user)]
 OptionalUser = Annotated[User | None, Depends(get_current_user_optional)]
 AdminUser = Annotated[User, Depends(require_admin_user)]
 ValidAPIKey = Annotated[str | None, Depends(get_api_key)]
+
+# Supabase-based dependencies (preferred for new code)
+from codestory.core.supabase import (
+    get_current_user as get_supabase_user,
+    get_current_user_optional as get_supabase_user_optional,
+    get_current_user_id as get_supabase_user_id,
+)
+
+# Supabase user dict (id, email, role, metadata)
+SupabaseUser = Annotated[dict, Depends(get_supabase_user)]
+SupabaseUserOptional = Annotated[dict | None, Depends(get_supabase_user_optional)]
+SupabaseUserId = Annotated[str, Depends(get_supabase_user_id)]

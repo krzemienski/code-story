@@ -48,7 +48,12 @@ class Settings(BaseSettings):
     github_token: str = ""
     github_api_base: str = "https://api.github.com"
 
-    # JWT Authentication
+    # Supabase (primary backend - replaces custom JWT auth)
+    supabase_url: str = ""
+    supabase_anon_key: str = ""
+    supabase_service_role_key: str = ""  # For server-side admin operations
+
+    # JWT Authentication (legacy - kept for migration period)
     secret_key: str = "change-me-in-production"
     jwt_secret_key: str = ""  # Falls back to secret_key if not set
     jwt_algorithm: str = "HS256"
@@ -115,6 +120,14 @@ class Settings(BaseSettings):
     def has_aws_credentials(self) -> bool:
         """Check if AWS credentials are configured."""
         return bool(self.aws_access_key_id and self.aws_secret_access_key)
+
+    def has_supabase_config(self) -> bool:
+        """Check if Supabase is configured (URL and anon key required)."""
+        return bool(self.supabase_url and self.supabase_anon_key)
+
+    def has_supabase_admin(self) -> bool:
+        """Check if Supabase service role key is configured for admin operations."""
+        return bool(self.supabase_url and self.supabase_service_role_key)
 
 
 @lru_cache

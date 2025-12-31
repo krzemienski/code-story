@@ -92,11 +92,14 @@ def create_app() -> FastAPI:
     app.add_middleware(GZipMiddleware, minimum_size=1000)
 
     # Import and register routers
-    from codestory.api.routers import auth, stories, users
+    from codestory.api.routers import auth, auth_supabase, stories, users
     from codestory.api.routers import health, sse
 
     app.include_router(health.router, prefix="/api", tags=["health"])
-    app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
+    # Supabase Auth (primary) - uses Supabase Auth service
+    app.include_router(auth_supabase.router, prefix="/api/auth", tags=["auth"])
+    # Legacy auth (kept for migration) - uses custom JWT
+    app.include_router(auth.router, prefix="/api/auth/legacy", tags=["auth-legacy"])
     app.include_router(users.router, prefix="/api/users", tags=["users"])
     app.include_router(stories.router, prefix="/api/stories", tags=["stories"])
     app.include_router(sse.router, prefix="/api/sse", tags=["sse"])

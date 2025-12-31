@@ -29,6 +29,8 @@ dependencies = [
     "celery[redis]>=5.4.0",
     # AWS S3
     "boto3>=1.35.0",
+    # Supabase
+    "supabase>=2.10.0",
 ]
 
 [project.optional-dependencies]
