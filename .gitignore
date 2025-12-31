@@ -1,1 +1,95 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# IDE and editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+
+# Environment files (secrets)
+.env
+.env.local
+.env.*.local
+*.env
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+*.egg
+.eggs/
+*.whl
+
+# Coverage reports
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+coverage.xml
+*.cover
+
+# Type checking
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Audio output files
+*.mp3
+*.wav
+*.ogg
+*.m4a
+
+# Log files
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# MacOS
 .DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# Alembic versions (keep structure, not generated files)
+# alembic/versions/*.py  # Uncomment to ignore migrations
+
+# Node modules (if any frontend tooling)
+node_modules/
+
+# Ruff cache
+.ruff_cache/
