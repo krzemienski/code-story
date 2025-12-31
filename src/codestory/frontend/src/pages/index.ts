@@ -1,1 +1,7 @@
 export { HomePage } from './home'
+export { LoginPage } from './login'
+export { RegisterPage } from './register'
+export { AuthCallbackPage } from './auth-callback'
+export { DashboardPage } from './dashboard'
+export { NewStoryPage } from './new-story'
+export { StoryDetailPage } from './story-detail'
