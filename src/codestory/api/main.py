@@ -43,7 +43,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Initialize Claude Agent SDK MCP server
     logger.info("Initializing Claude Agent SDK MCP server...")
     app.state.sdk_server = create_codestory_server()
-    logger.info(f"SDK server initialized with {len(app.state.sdk_server.tools)} tools")
+    # SDK server returns dict with 'name' and 'instance' keys
+    server_name = app.state.sdk_server.get("name", "codestory")
+    logger.info(f"SDK server '{server_name}' initialized")
 
     yield
 
