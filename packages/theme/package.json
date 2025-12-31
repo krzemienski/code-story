@@ -1,0 +1,49 @@
+{
+  "name": "@codestory/theme",
+  "version": "0.1.0",
+  "description": "Code Story shared theme for React and React Native",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./web": {
+      "import": "./dist/web.js",
+      "types": "./dist/web.d.ts"
+    },
+    "./native": {
+      "import": "./dist/native.js",
+      "types": "./dist/native.d.ts"
+    },
+    "./tailwind": {
+      "import": "./dist/tailwind.js",
+      "types": "./dist/tailwind.d.ts"
+    },
+    "./nativewind": {
+      "import": "./dist/nativewind.js",
+      "types": "./dist/nativewind.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  },
+  "keywords": [
+    "theme",
+    "tailwind",
+    "nativewind",
+    "react",
+    "react-native"
+  ]
+}
