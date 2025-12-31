@@ -93,3 +93,8 @@ node_modules/
 
 # Ruff cache
 .ruff_cache/
+
+# Local workspace configs
+.claude/
+.serena/
+plans/
