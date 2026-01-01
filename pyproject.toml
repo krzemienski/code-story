@@ -25,12 +25,14 @@ dependencies = [
     # Authentication
     "python-jose[cryptography]>=3.3.0",
     "passlib[bcrypt]>=1.7.4",
+    "pyotp>=2.9.0",  # TOTP for 2FA
     # Task queue
     "celery[redis]>=5.4.0",
     # AWS S3
     "boto3>=1.35.0",
     # Supabase
     "supabase>=2.10.0",
+    "python-dotenv>=1.2.1",
 ]
 
 [project.optional-dependencies]

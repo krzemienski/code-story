@@ -1,0 +1,312 @@
+# =============================================================================
+# Code Story Helm Chart - Default Values
+# =============================================================================
+
+# Global settings
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+  storageClass: ""
+
+# -----------------------------------------------------------------------------
+# API Configuration
+# -----------------------------------------------------------------------------
+api:
+  replicaCount: 2
+
+  image:
+    repository: ghcr.io/codestory/backend
+    tag: "latest"
+    pullPolicy: IfNotPresent
+
+  service:
+    type: ClusterIP
+    port: 8000
+
+  ingress:
+    enabled: true
+    className: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+      nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+    hosts:
+      - host: api.codestory.dev
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: api-tls
+        hosts:
+          - api.codestory.dev
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# -----------------------------------------------------------------------------
+# Celery Worker Configuration
+# -----------------------------------------------------------------------------
+celeryWorker:
+  replicaCount: 2
+
+  image:
+    repository: ghcr.io/codestory/backend
+    tag: "latest"
+    pullPolicy: IfNotPresent
+
+  command:
+    - celery
+    - -A
+    - codestory.workers.celery_app
+    - worker
+    - --loglevel=info
+    - --concurrency=4
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 20
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# -----------------------------------------------------------------------------
+# Celery Beat (Scheduler)
+# -----------------------------------------------------------------------------
+celeryBeat:
+  enabled: true
+
+  image:
+    repository: ghcr.io/codestory/backend
+    tag: "latest"
+    pullPolicy: IfNotPresent
+
+  command:
+    - celery
+    - -A
+    - codestory.workers.celery_app
+    - beat
+    - --loglevel=info
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# -----------------------------------------------------------------------------
+# Web Frontend
+# -----------------------------------------------------------------------------
+web:
+  enabled: true
+  replicaCount: 2
+
+  image:
+    repository: ghcr.io/codestory/frontend
+    tag: "latest"
+    pullPolicy: IfNotPresent
+
+  service:
+    type: ClusterIP
+    port: 80
+
+  ingress:
+    enabled: true
+    className: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+    hosts:
+      - host: app.codestory.dev
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: web-tls
+        hosts:
+          - app.codestory.dev
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+# -----------------------------------------------------------------------------
+# Mobile Web (Expo Export)
+# -----------------------------------------------------------------------------
+mobile:
+  enabled: false
+  replicaCount: 1
+
+  image:
+    repository: ghcr.io/codestory/mobile
+    tag: "latest"
+    pullPolicy: IfNotPresent
+
+  service:
+    type: ClusterIP
+    port: 80
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+# -----------------------------------------------------------------------------
+# PostgreSQL (Bitnami subchart)
+# -----------------------------------------------------------------------------
+postgresql:
+  enabled: true
+  auth:
+    postgresPassword: ""  # Set via secret or --set
+    username: codestory
+    password: ""  # Set via secret or --set
+    database: codestory
+  primary:
+    persistence:
+      enabled: true
+      size: 50Gi
+      storageClass: ""
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: 2000m
+        memory: 4Gi
+  metrics:
+    enabled: true
+
+# External PostgreSQL (when postgresql.enabled=false)
+externalDatabase:
+  host: ""
+  port: 5432
+  username: codestory
+  password: ""
+  database: codestory
+  existingSecret: ""
+  existingSecretPasswordKey: password
+
+# -----------------------------------------------------------------------------
+# Redis (Bitnami subchart)
+# -----------------------------------------------------------------------------
+redis:
+  enabled: true
+  architecture: standalone
+  auth:
+    enabled: true
+    password: ""  # Set via secret or --set
+  master:
+    persistence:
+      enabled: true
+      size: 10Gi
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi
+  metrics:
+    enabled: true
+
+# External Redis (when redis.enabled=false)
+externalRedis:
+  host: ""
+  port: 6379
+  password: ""
+  existingSecret: ""
+  existingSecretPasswordKey: password
+
+# -----------------------------------------------------------------------------
+# S3/Object Storage
+# -----------------------------------------------------------------------------
+s3:
+  bucket: codestory-audio
+  region: us-east-1
+  endpoint: ""  # For S3-compatible storage (MinIO, etc.)
+  existingSecret: ""
+  accessKeyId: ""
+  secretAccessKey: ""
+
+# -----------------------------------------------------------------------------
+# Supabase Configuration
+# -----------------------------------------------------------------------------
+supabase:
+  url: ""
+  anonKey: ""
+  serviceRoleKey: ""
+  existingSecret: ""
+
+# -----------------------------------------------------------------------------
+# Secrets (API Keys)
+# -----------------------------------------------------------------------------
+secrets:
+  create: true
+  existingSecret: ""
+
+  # Only used when secrets.create=true
+  jwtSecret: ""  # Generate: openssl rand -hex 32
+  anthropicApiKey: ""
+  elevenLabsApiKey: ""
+  githubToken: ""
+
+# -----------------------------------------------------------------------------
+# Service Account
+# -----------------------------------------------------------------------------
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# -----------------------------------------------------------------------------
+# Monitoring
+# -----------------------------------------------------------------------------
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: false
+    namespace: ""
+    interval: 30s
+    scrapeTimeout: 10s
+
+# -----------------------------------------------------------------------------
+# Network Policies
+# -----------------------------------------------------------------------------
+networkPolicy:
+  enabled: true

@@ -82,6 +82,16 @@ class Settings(BaseSettings):
     max_story_duration_minutes: int = 30
     max_repo_size_mb: int = 100
 
+    # SSO Configuration (Enterprise)
+    # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    sso_encryption_key: str = ""  # Fernet key for encrypting SSO secrets
+    base_url: str = "http://localhost:3000"  # Base URL for SSO callbacks
+
+    @property
+    def APP_NAME(self) -> str:
+        """Alias for app_name (uppercase for legacy compatibility)."""
+        return self.app_name
+
     @property
     def async_database_url(self) -> str:
         """Ensure database URL uses asyncpg."""

@@ -1,0 +1,28 @@
+apiVersion: v2
+name: code-story
+description: Transform code repositories into engaging audio narratives using Claude Agent SDK
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - code
+  - audio
+  - ai
+  - documentation
+  - narrative
+  - claude
+maintainers:
+  - name: Code Story Team
+    email: team@codestory.dev
+home: https://codestory.dev
+sources:
+  - https://github.com/codestory/codestory
+dependencies:
+  - name: postgresql
+    version: "14.0.0"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: postgresql.enabled
+  - name: redis
+    version: "18.0.0"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: redis.enabled

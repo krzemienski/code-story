@@ -1,20 +1,25 @@
 """Stories router for story generation and management.
 
-Endpoints for creating and managing audio stories using the Claude Agent SDK pipeline.
+Endpoints for creating and managing audio stories using the services-first architecture:
+
+    Frontend → FastAPI → Backend Services (prepare context) → Agent (creative work)
+
 Uses BackgroundTasks for async pipeline execution and SSE for progress updates.
 """
 
 from datetime import datetime
 from typing import Annotated
-from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Path, Query, Request, status
 from pydantic import BaseModel, Field, HttpUrl
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from codestory.agents import CodeStoryClient, PipelineStage
-from codestory.api.deps import CurrentUser, DBSession
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from codestory.api.deps import DBSession, SupabaseUser
+
+# Security scheme for extracting token
+security = HTTPBearer()
 from codestory.api.exceptions import NotFoundError
 from codestory.api.routers.sse import publish_completion, publish_error, publish_progress
 from codestory.models.story import (
@@ -24,6 +29,15 @@ from codestory.models.story import (
     StoryChapter,
     StoryStatus,
 )
+# Import StoryPipeline (with actual Claude SDK integration) instead of PipelineService (TODOs)
+from codestory.pipeline.orchestrator import (
+    StoryPipeline,
+    PipelineEvent,
+    PipelineEventType,
+)
+from codestory.agents.base import PipelineStage as AgentPipelineStage
+# Keep StoryGenerationRequest for backwards compatibility (may be needed elsewhere)
+from codestory.services import StoryGenerationRequest
 
 router = APIRouter()
 
@@ -113,19 +127,29 @@ async def run_story_pipeline(
     repo_url: str,
     user_intent: str,
     style: str,
+    focus_areas: list[str],
     db_url: str,
 ) -> None:
     """Execute story generation pipeline in background.
 
-    This function runs the Claude Agent SDK pipeline and updates the story
-    record as it progresses through stages. Publishes SSE events for real-time
-    progress tracking.
+    This function uses the SERVICES-FIRST architecture:
+
+        1. Backend Services (deterministic):
+           - RepositoryService: Package repo with Repomix CLI
+           - AnalysisService: Analyze structure and patterns
+
+        2. Agent (creative work):
+           - Receives prepared context
+           - Generates narrative
+
+    Publishes SSE events for real-time progress tracking.
 
     Args:
         story_id: Database ID of the story
         repo_url: GitHub repository URL
-        user_intent: User's learning goals
+        user_intent: User's learning goals (maps to intent_category)
         style: Narrative style (documentary, tutorial, etc.)
+        focus_areas: Areas to focus on in the story
         db_url: Database connection URL for background context
     """
     from codestory.models.database import get_engine
@@ -139,105 +163,86 @@ async def run_story_pipeline(
 
     async with async_session() as db:
         try:
-            # Update status to analyzing
+            # Verify story exists
             result = await db.execute(select(Story).where(Story.id == story_id))
             story = result.scalar_one_or_none()
             if not story:
                 await publish_error(story_id_str, "Story not found")
                 return
 
-            story.status = StoryStatus.ANALYZING
-            await db.commit()
-            await publish_progress(story_id_str, "analyzing", 10, "Starting repository analysis...")
+            # Create StoryPipeline (with actual Claude SDK integration)
+            # This uses ClaudeSDKClient to invoke the 4-agent pipeline
+            pipeline = StoryPipeline()
 
-            # Run the Claude Agent SDK pipeline
-            def on_progress(stage: PipelineStage, message: str, percent: int) -> None:
-                """Progress callback - note: this is sync, SSE publish is async."""
-                import asyncio
-                # Schedule SSE publish in event loop
-                try:
-                    loop = asyncio.get_event_loop()
-                    status_map = {
-                        PipelineStage.INTENT: "analyzing",
-                        PipelineStage.ANALYSIS: "analyzing",
-                        PipelineStage.NARRATIVE: "generating",
-                        PipelineStage.SYNTHESIS: "synthesizing",
-                        PipelineStage.COMPLETE: "complete",
-                        PipelineStage.FAILED: "failed",
-                    }
-                    loop.create_task(
-                        publish_progress(story_id_str, status_map.get(stage, "analyzing"), percent, message)
-                    )
-                except RuntimeError:
-                    pass  # No event loop, skip SSE
+            # Map AgentPipelineStage (from base.py) to StoryStatus
+            stage_status_map = {
+                AgentPipelineStage.INTENT: StoryStatus.PENDING,
+                AgentPipelineStage.ANALYSIS: StoryStatus.ANALYZING,
+                AgentPipelineStage.NARRATIVE: StoryStatus.GENERATING,
+                AgentPipelineStage.SYNTHESIS: StoryStatus.SYNTHESIZING,
+                AgentPipelineStage.COMPLETE: StoryStatus.COMPLETE,
+                AgentPipelineStage.FAILED: StoryStatus.FAILED,
+            }
 
-            async with CodeStoryClient(on_progress=on_progress) as client:
-                final_result = None
+            # Map AgentPipelineStage to SSE status strings
+            sse_status_map = {
+                AgentPipelineStage.INTENT: "pending",
+                AgentPipelineStage.ANALYSIS: "analyzing",
+                AgentPipelineStage.NARRATIVE: "generating",
+                AgentPipelineStage.SYNTHESIS: "synthesizing",
+                AgentPipelineStage.COMPLETE: "complete",
+                AgentPipelineStage.FAILED: "failed",
+            }
 
-                async for update in client.generate_story(
-                    repo_url=repo_url,
-                    user_intent=user_intent,
-                    style=style,
-                ):
-                    stage = update.get("stage", "")
-                    progress = update.get("progress", 0)
-
-                    # Map pipeline stages to story status
-                    if stage in ("intent", "analysis"):
-                        story.status = StoryStatus.ANALYZING
-                    elif stage == "narrative":
-                        story.status = StoryStatus.GENERATING
-                    elif stage == "synthesis":
-                        story.status = StoryStatus.SYNTHESIZING
+            # Run the 4-agent pipeline with actual Claude SDK invocation
+            async for event in pipeline.run(
+                repo_url=repo_url,
+                user_message=user_intent,
+                style=style,
+            ):
+                # Update story status based on pipeline stage
+                new_status = stage_status_map.get(event.stage)
+                if new_status and story.status != new_status:
+                    story.status = new_status
                     await db.commit()
 
-                    # Capture final result
-                    if "result" in update:
-                        final_result = update["result"]
-
-                    # Handle errors
-                    if stage == "failed":
-                        error_msg = update.get("error", "Unknown pipeline error")
-                        story.status = StoryStatus.FAILED
-                        story.error_message = error_msg
-                        await db.commit()
-                        await publish_error(story_id_str, error_msg)
-                        return
-
-            # Process successful result
-            if final_result and final_result.success:
-                story.status = StoryStatus.COMPLETE
-                story.audio_url = final_result.audio_url
-                story.duration_seconds = final_result.duration_seconds
-                story.completed_at = datetime.utcnow()
-
-                # Create chapters from result
-                for i, chapter_data in enumerate(final_result.chapters):
-                    chapter = StoryChapter(
-                        story_id=story_id,
-                        order=i + 1,
-                        title=chapter_data.get("title", f"Chapter {i + 1}"),
-                        script=chapter_data.get("content", ""),
-                        audio_url=chapter_data.get("audio_url"),
-                        start_time=chapter_data.get("start_time", 0.0),
-                        duration_seconds=chapter_data.get("duration_seconds"),
-                    )
-                    db.add(chapter)
-
-                await db.commit()
-
-                await publish_completion(
+                # Publish SSE event for real-time progress
+                await publish_progress(
                     story_id_str,
-                    audio_url=final_result.audio_url or "",
-                    duration_seconds=final_result.duration_seconds,
-                    chapters=len(final_result.chapters),
+                    sse_status_map.get(event.stage, "analyzing"),
+                    event.progress_percent,
+                    event.message,
                 )
-            else:
-                error_msg = final_result.error if final_result else "Pipeline produced no result"
-                story.status = StoryStatus.FAILED
-                story.error_message = error_msg
-                await db.commit()
-                await publish_error(story_id_str, error_msg)
+
+                # Handle completion (type is PipelineEventType.COMPLETED)
+                if event.type == PipelineEventType.COMPLETED:
+                    story.status = StoryStatus.COMPLETE
+                    story.completed_at = datetime.utcnow()
+                    story.duration_seconds = event.data.get("duration_seconds", 0)
+
+                    # Get result data from the pipeline
+                    audio_url = event.data.get("audio_url", "")
+                    chapters_count = event.data.get("chapters", 0)
+
+                    if audio_url:
+                        story.audio_url = audio_url
+
+                    await db.commit()
+                    await publish_completion(
+                        story_id_str,
+                        audio_url=audio_url,
+                        duration_seconds=story.duration_seconds or 0,
+                        chapters=chapters_count,
+                    )
+                    return
+
+                # Handle failure (type is PipelineEventType.FAILED)
+                if event.type == PipelineEventType.FAILED:
+                    story.status = StoryStatus.FAILED
+                    story.error_message = event.error or event.message
+                    await db.commit()
+                    await publish_error(story_id_str, event.error or event.message)
+                    return
 
         except Exception as e:
             # Update story with error
@@ -253,19 +258,92 @@ async def run_story_pipeline(
             await publish_error(story_id_str, str(e))
 
 
+def _map_intent(user_intent: str) -> str:
+    """Map user intent text to intent category."""
+    intent_lower = user_intent.lower()
+    if any(word in intent_lower for word in ["onboard", "new", "getting started"]):
+        return "onboarding"
+    if any(word in intent_lower for word in ["architect", "design", "structure"]):
+        return "architecture"
+    if any(word in intent_lower for word in ["feature", "function", "capability"]):
+        return "feature"
+    if any(word in intent_lower for word in ["debug", "fix", "issue", "bug"]):
+        return "debugging"
+    if any(word in intent_lower for word in ["review", "audit", "check"]):
+        return "review"
+    return "architecture"  # Default
+
+
 # =============================================================================
 # Endpoints
 # =============================================================================
 
 
-@router.post("", response_model=StoryResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=StoryResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a new story",
+    description="""
+    Create a new audio story from a repository.
+
+    The story generation process:
+    1. Repository is cloned and analyzed via Repomix
+    2. Code structure and patterns are identified
+    3. Narrative outline is generated based on style
+    4. Chapters are created with appropriate depth
+    5. Audio is synthesized using ElevenLabs
+
+    **Webhook Events**: `story.created`, `story.analyzing`, `story.generating`, `story.completed`
+
+    Use the SSE endpoint `/api/sse/stories/{story_id}` to track real-time progress.
+    """,
+    response_description="The created story with PENDING status",
+    responses={
+        201: {
+            "description": "Story created successfully",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "id": 1,
+                        "title": "Understanding My API",
+                        "status": "pending",
+                        "narrative_style": "educational",
+                        "focus_areas": ["architecture"],
+                        "repository_url": "https://github.com/user/repo",
+                        "created_at": "2025-01-15T10:30:00Z",
+                    }
+                }
+            },
+        },
+        400: {
+            "description": "Invalid repository URL or parameters",
+            "content": {
+                "application/json": {"example": {"detail": "Invalid GitHub repository URL"}}
+            },
+        },
+        402: {
+            "description": "Story quota exceeded",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": {
+                            "error": "Daily quota exceeded",
+                            "quota_info": {"daily": {"used": 2, "limit": 2}},
+                        }
+                    }
+                }
+            },
+        },
+    },
+)
 async def create_story(
     request: StoryCreateRequest,
     background_tasks: BackgroundTasks,
-    user: CurrentUser,
-    db: DBSession,
+    user: SupabaseUser,
+    credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)],
     http_request: Request,
-) -> Story:
+) -> StoryResponse:
     """Create a new story and start generation pipeline.
 
     Creates the story record and kicks off the Claude Agent SDK pipeline
@@ -275,44 +353,48 @@ async def create_story(
         request: Story creation parameters
         background_tasks: FastAPI background tasks
         user: Authenticated user
-        db: Database session
+        credentials: Bearer token for Supabase auth
         http_request: FastAPI request for app state access
 
     Returns:
         Created story with PENDING status
     """
+    from codestory.core.supabase import get_supabase_client
+
+    supabase = get_supabase_client()
+    # Set auth header to use user's permissions (RLS)
+    supabase.postgrest.auth(credentials.credentials)
     repo_url = str(request.repository_url)
+    user_id = user["id"]
 
     # Find or create repository record
-    result = await db.execute(select(Repository).where(Repository.url == repo_url))
-    repository = result.scalar_one_or_none()
+    repo_result = supabase.table("repositories").select("*").eq("url", repo_url).execute()
 
-    if not repository:
+    if repo_result.data:
+        repository = repo_result.data[0]
+    else:
         # Parse owner/name from URL
         parts = repo_url.rstrip("/").split("/")
         owner = parts[-2] if len(parts) >= 2 else "unknown"
         name = parts[-1] if parts else "unknown"
 
-        repository = Repository(
-            url=repo_url,
-            owner=owner,
-            name=name,
-        )
-        db.add(repository)
-        await db.flush()  # Get repository ID
+        insert_result = supabase.table("repositories").insert({
+            "url": repo_url,
+            "owner": owner,
+            "name": name,
+        }).execute()
+        repository = insert_result.data[0]
 
     # Create story record
-    story = Story(
-        user_id=user.id,
-        repository_id=repository.id,
-        title=request.title,
-        narrative_style=request.narrative_style,
-        focus_areas=request.focus_areas,
-        status=StoryStatus.PENDING,
-    )
-    db.add(story)
-    await db.commit()
-    await db.refresh(story)
+    story_result = supabase.table("stories").insert({
+        "user_id": user_id,
+        "repository_id": repository["id"],
+        "title": request.title,
+        "narrative_style": request.narrative_style.value,
+        "focus_areas": request.focus_areas,
+        "status": "pending",
+    }).execute()
+    story = story_result.data[0]
 
     # Get settings for background task
     from codestory.core.config import get_settings
@@ -321,33 +403,56 @@ async def create_story(
     # Start pipeline in background
     background_tasks.add_task(
         run_story_pipeline,
-        story_id=story.id,
+        story_id=story["id"],
         repo_url=repo_url,
         user_intent=request.user_intent,
         style=request.narrative_style.value,
+        focus_areas=request.focus_areas,
         db_url=settings.async_database_url,
     )
 
-    # Load relationships for response
-    story.repository = repository
-    story.chapters = []
+    # Return response
+    return StoryResponse(
+        id=story["id"],
+        title=story["title"],
+        status=StoryStatus(story["status"]),
+        narrative_style=NarrativeStyle(story["narrative_style"]),
+        focus_areas=story.get("focus_areas") or [],
+        repository_url=repository.get("url", ""),
+        audio_url=story.get("audio_url"),
+        transcript=story.get("transcript"),
+        duration_seconds=story.get("duration_seconds"),
+        error_message=story.get("error_message"),
+        chapters=[],
+        created_at=story["created_at"],
+        updated_at=story["updated_at"],
+        completed_at=story.get("completed_at"),
+    )
 
-    return story
 
+@router.get(
+    "",
+    response_model=StoryListResponse,
+    summary="List user's stories",
+    description="""
+    List all stories for the authenticated user with pagination.
 
-@router.get("", response_model=StoryListResponse)
+    Supports filtering by:
+    - Status (pending, analyzing, generating, completed, failed)
+
+    Results are paginated and sorted by creation date (newest first).
+    """,
+)
 async def list_stories(
-    user: CurrentUser,
-    db: DBSession,
-    page: Annotated[int, Query(ge=1)] = 1,
-    page_size: Annotated[int, Query(ge=1, le=100)] = 20,
-    status_filter: StoryStatus | None = None,
+    user: SupabaseUser,
+    page: Annotated[int, Query(ge=1, description="Page number (1-indexed)")] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100, description="Items per page (max 100)")] = 20,
+    status_filter: Annotated[StoryStatus | None, Query(description="Filter by story status")] = None,
 ) -> StoryListResponse:
     """List stories for the current user.
 
     Args:
         user: Authenticated user
-        db: Database session
         page: Page number (1-indexed)
         page_size: Items per page
         status_filter: Optional status filter
@@ -355,46 +460,60 @@ async def list_stories(
     Returns:
         Paginated list of stories
     """
-    # Build query
-    query = select(Story).where(Story.user_id == user.id)
+    from codestory.core.supabase import get_supabase_client
+
+    supabase = get_supabase_client()
+    user_id = user["id"]
+
+    # Build query using Supabase client
+    query = supabase.table("stories").select("*, repositories(*), story_chapters(*)").eq("user_id", user_id)
+
     if status_filter:
-        query = query.where(Story.status == status_filter)
+        query = query.eq("status", status_filter.value)
 
-    # Count total
-    from sqlalchemy import func as sql_func
-    count_query = select(sql_func.count()).select_from(query.subquery())
-    total_result = await db.execute(count_query)
-    total = total_result.scalar() or 0
+    # Get total count
+    count_response = supabase.table("stories").select("id", count="exact").eq("user_id", user_id)
+    if status_filter:
+        count_response = count_response.eq("status", status_filter.value)
+    count_result = count_response.execute()
+    total = count_result.count or 0
 
-    # Get page
+    # Apply pagination and ordering
     offset = (page - 1) * page_size
-    query = (
-        query.options(selectinload(Story.repository), selectinload(Story.chapters))
-        .order_by(Story.created_at.desc())
-        .offset(offset)
-        .limit(page_size)
-    )
-    result = await db.execute(query)
-    stories = result.scalars().all()
+    query = query.order("created_at", desc=True).range(offset, offset + page_size - 1)
+
+    # Execute query
+    result = query.execute()
+    stories_data = result.data or []
 
     # Convert to response format
     items = []
-    for story in stories:
+    for story in stories_data:
+        repo = story.get("repositories") or {}
+        chapters = story.get("story_chapters") or []
         items.append(StoryResponse(
-            id=story.id,
-            title=story.title,
-            status=story.status,
-            narrative_style=story.narrative_style,
-            focus_areas=story.focus_areas,
-            repository_url=story.repository.url if story.repository else "",
-            audio_url=story.audio_url,
-            transcript=story.transcript,
-            duration_seconds=story.duration_seconds,
-            error_message=story.error_message,
-            chapters=[ChapterResponse.model_validate(c) for c in story.chapters],
-            created_at=story.created_at,
-            updated_at=story.updated_at,
-            completed_at=story.completed_at,
+            id=story["id"],
+            title=story["title"],
+            status=StoryStatus(story["status"]),
+            narrative_style=NarrativeStyle(story["narrative_style"]),
+            focus_areas=story.get("focus_areas") or [],
+            repository_url=repo.get("url", ""),
+            audio_url=story.get("audio_url"),
+            transcript=story.get("transcript"),
+            duration_seconds=story.get("duration_seconds"),
+            error_message=story.get("error_message"),
+            chapters=[ChapterResponse(
+                id=c["id"],
+                order=c["order"],
+                title=c["title"],
+                script=c["script"],
+                audio_url=c.get("audio_url"),
+                start_time=c.get("start_time", 0.0),
+                duration_seconds=c.get("duration_seconds"),
+            ) for c in chapters],
+            created_at=story["created_at"],
+            updated_at=story["updated_at"],
+            completed_at=story.get("completed_at"),
         ))
 
     return StoryListResponse(
@@ -402,22 +521,37 @@ async def list_stories(
         total=total,
         page=page,
         page_size=page_size,
-        has_more=(offset + len(stories)) < total,
+        has_more=(offset + len(stories_data)) < total,
     )
 
 
-@router.get("/{story_id}", response_model=StoryResponse)
+@router.get(
+    "/{story_id}",
+    response_model=StoryResponse,
+    summary="Get story details",
+    description="""
+    Retrieve detailed information about a specific story.
+
+    Includes:
+    - Story metadata and status
+    - List of chapters with durations
+    - Audio URLs (if completed)
+    - Error message (if failed)
+    """,
+    responses={
+        200: {"description": "Story details with chapters"},
+        404: {"description": "Story not found or not owned by user"},
+    },
+)
 async def get_story(
-    story_id: int,
-    user: CurrentUser,
-    db: DBSession,
-) -> Story:
+    story_id: Annotated[int, Path(description="Unique story identifier")],
+    user: SupabaseUser,
+) -> StoryResponse:
     """Get a specific story by ID.
 
     Args:
         story_id: Story database ID
         user: Authenticated user
-        db: Database session
 
     Returns:
         Story details with chapters
@@ -425,23 +559,63 @@ async def get_story(
     Raises:
         NotFoundError: If story doesn't exist or user doesn't own it
     """
-    result = await db.execute(
-        select(Story)
-        .options(selectinload(Story.repository), selectinload(Story.chapters))
-        .where(Story.id == story_id, Story.user_id == user.id)
-    )
-    story = result.scalar_one_or_none()
+    from codestory.core.supabase import get_supabase_client
 
-    if not story:
+    supabase = get_supabase_client()
+    user_id = user["id"]
+
+    # Query story with related data
+    result = supabase.table("stories").select(
+        "*, repositories(*), story_chapters(*)"
+    ).eq("id", story_id).eq("user_id", user_id).execute()
+
+    if not result.data:
         raise NotFoundError("Story", str(story_id))
 
-    return story
+    story = result.data[0]
+    repo = story.get("repositories") or {}
+    chapters = story.get("story_chapters") or []
+
+    return StoryResponse(
+        id=story["id"],
+        title=story["title"],
+        status=StoryStatus(story["status"]),
+        narrative_style=NarrativeStyle(story["narrative_style"]),
+        focus_areas=story.get("focus_areas") or [],
+        repository_url=repo.get("url", ""),
+        audio_url=story.get("audio_url"),
+        transcript=story.get("transcript"),
+        duration_seconds=story.get("duration_seconds"),
+        error_message=story.get("error_message"),
+        chapters=[ChapterResponse(
+            id=c["id"],
+            order=c["order"],
+            title=c["title"],
+            script=c["script"],
+            audio_url=c.get("audio_url"),
+            start_time=c.get("start_time", 0.0),
+            duration_seconds=c.get("duration_seconds"),
+        ) for c in chapters],
+        created_at=story["created_at"],
+        updated_at=story["updated_at"],
+        completed_at=story.get("completed_at"),
+    )
 
 
-@router.get("/{story_id}/status", response_model=StoryStatusResponse)
+@router.get(
+    "/{story_id}/status",
+    response_model=StoryStatusResponse,
+    summary="Get story status",
+    description="""
+    Lightweight endpoint for polling generation status.
+
+    Returns current status, progress percentage, and current step.
+    For real-time updates, use the SSE endpoint `/api/sse/stories/{story_id}`.
+    """,
+)
 async def get_story_status(
-    story_id: int,
-    user: CurrentUser,
+    story_id: Annotated[int, Path(description="Unique story identifier")],
+    user: SupabaseUser,
     db: DBSession,
 ) -> StoryStatusResponse:
     """Get story generation status.
@@ -461,7 +635,7 @@ async def get_story_status(
         NotFoundError: If story doesn't exist or user doesn't own it
     """
     result = await db.execute(
-        select(Story).where(Story.id == story_id, Story.user_id == user.id)
+        select(Story).where(Story.id == story_id, Story.user_id == user["id"])
     )
     story = result.scalar_one_or_none()
 
@@ -488,11 +662,20 @@ async def get_story_status(
     )
 
 
-@router.delete("/{story_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{story_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a story",
+    description="Permanently delete a story and all its chapters.",
+    responses={
+        204: {"description": "Story deleted successfully"},
+        404: {"description": "Story not found"},
+    },
+)
 async def delete_story(
-    story_id: int,
-    user: CurrentUser,
-    db: DBSession,
+    story_id: Annotated[int, Path(description="Unique story identifier")],
+    user: SupabaseUser,
+    credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)],
 ) -> None:
     """Delete a story.
 
@@ -502,28 +685,49 @@ async def delete_story(
     Args:
         story_id: Story database ID
         user: Authenticated user
-        db: Database session
+        credentials: Bearer token for Supabase auth
 
     Raises:
         NotFoundError: If story doesn't exist or user doesn't own it
     """
-    result = await db.execute(
-        select(Story).where(Story.id == story_id, Story.user_id == user.id)
-    )
-    story = result.scalar_one_or_none()
+    from codestory.core.supabase import get_supabase_client
 
-    if not story:
+    supabase = get_supabase_client()
+    supabase.postgrest.auth(credentials.credentials)
+    user_id = user["id"]
+
+    # Check story exists and belongs to user
+    result = supabase.table("stories").select("id").eq("id", story_id).eq("user_id", user_id).execute()
+    if not result.data:
         raise NotFoundError("Story", str(story_id))
 
-    await db.delete(story)
-    await db.commit()
+    # Delete chapters first (cascade)
+    supabase.table("story_chapters").delete().eq("story_id", story_id).execute()
+
+    # Delete story
+    supabase.table("stories").delete().eq("id", story_id).eq("user_id", user_id).execute()
 
 
-@router.post("/{story_id}/retry", response_model=StoryResponse)
+@router.post(
+    "/{story_id}/retry",
+    response_model=StoryResponse,
+    summary="Retry failed story",
+    description="""
+    Retry generation for a failed story.
+
+    Only works for stories in FAILED status. Resets the status
+    to PENDING and restarts the Claude Agent SDK pipeline.
+    """,
+    responses={
+        200: {"description": "Story retry initiated"},
+        400: {"description": "Story is not in FAILED status"},
+        404: {"description": "Story not found"},
+    },
+)
 async def retry_story(
-    story_id: int,
+    story_id: Annotated[int, Path(description="Unique story identifier")],
     background_tasks: BackgroundTasks,
-    user: CurrentUser,
+    user: SupabaseUser,
     db: DBSession,
 ) -> Story:
     """Retry a failed story generation.
@@ -547,7 +751,7 @@ async def retry_story(
     result = await db.execute(
         select(Story)
         .options(selectinload(Story.repository))
-        .where(Story.id == story_id, Story.user_id == user.id)
+        .where(Story.id == story_id, Story.user_id == user["id"])
     )
     story = result.scalar_one_or_none()
 
@@ -584,6 +788,7 @@ async def retry_story(
         repo_url=story.repository.url,
         user_intent="Retry generation",  # Original intent not stored
         style=story.narrative_style.value,
+        focus_areas=story.focus_areas,
         db_url=settings.async_database_url,
     )
 

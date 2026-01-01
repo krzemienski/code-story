@@ -20,6 +20,7 @@ from .database import Base
 if TYPE_CHECKING:
     from .intent import StoryIntent
     from .user import User
+    from .team import Team
 
 
 class StoryStatus(str, Enum):
@@ -101,6 +102,12 @@ class Story(Base):
         nullable=True,
         index=True,
     )
+    # Team ownership (optional - None means personal story)
+    team_id: Mapped[str | None] = mapped_column(
+        ForeignKey("teams.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
     title: Mapped[str] = mapped_column(String(255))
     status: Mapped[StoryStatus] = mapped_column(
@@ -148,6 +155,11 @@ class Story(Base):
         order_by="StoryChapter.order",
         lazy="selectin",
         cascade="all, delete-orphan",
+    )
+    team: Mapped[Team | None] = relationship(
+        "Team",
+        back_populates="stories",
+        foreign_keys=[team_id],
     )
 
     def __repr__(self) -> str:

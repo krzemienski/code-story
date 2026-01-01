@@ -16,6 +16,7 @@ from sqlalchemy.sql import func
 from .database import Base
 
 if TYPE_CHECKING:
+    from .admin import AdminUser
     from .story import Story
 
 
@@ -56,6 +57,17 @@ class User(Base):
         back_populates="user",
         lazy="selectin",
     )
+    admin_profile: Mapped[AdminUser | None] = relationship(
+        "AdminUser",
+        back_populates="user",
+        uselist=False,
+        lazy="selectin",
+    )
+
+    @property
+    def is_admin(self) -> bool:
+        """Check if user has an active admin profile."""
+        return self.admin_profile is not None and self.admin_profile.is_active
 
     def __repr__(self) -> str:
         return f"<User(id={self.id}, email='{self.email}')>"

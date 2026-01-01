@@ -27,21 +27,19 @@ DBSession = Annotated[AsyncSession, Depends(get_session)]
 
 async def get_current_user(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)],
-    db: DBSession,
-) -> User:
-    """Get the current authenticated user from JWT token.
+) -> dict:
+    """Get the current authenticated user from Supabase JWT token.
 
     Args:
         credentials: Bearer token from Authorization header
-        db: Database session
 
     Returns:
-        Authenticated user
+        User dict from Supabase
 
     Raises:
         HTTPException: If authentication fails
     """
-    settings = get_settings()
+    from codestory.core.supabase import verify_supabase_jwt
 
     if credentials is None:
         raise HTTPException(
@@ -51,63 +49,21 @@ async def get_current_user(
         )
 
     token = credentials.credentials
+    user_data = await verify_supabase_jwt(token)
 
-    try:
-        payload = jwt.decode(
-            token,
-            settings.effective_jwt_secret,
-            algorithms=[settings.effective_jwt_algorithm],
-        )
-        user_id: str = payload.get("sub")
-        token_type: str = payload.get("type", "access")
-
-        if user_id is None:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token payload",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-
-        if token_type != "access":
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token type",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-
-    except JWTError as e:
+    if user_data is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Token validation failed: {e}",
+            detail="Invalid or expired token",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Fetch user from database
-    from sqlalchemy import select
-
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one_or_none()
-
-    if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    if not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="User account is disabled",
-        )
-
-    return user
+    return user_data
 
 
 async def get_current_user_optional(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)],
-    db: DBSession,
-) -> User | None:
+) -> dict | None:
     """Get current user if authenticated, None otherwise.
 
     Useful for endpoints that work for both authenticated and anonymous users.
@@ -116,7 +72,7 @@ async def get_current_user_optional(
         return None
 
     try:
-        return await get_current_user(credentials, db)
+        return await get_current_user(credentials)
     except HTTPException:
         return None
 
@@ -197,7 +153,22 @@ from codestory.core.supabase import (
     get_current_user as get_supabase_user,
     get_current_user_optional as get_supabase_user_optional,
     get_current_user_id as get_supabase_user_id,
+    get_supabase_admin,
 )
+from supabase import Client as SupabaseClient
+
+
+def get_supabase() -> SupabaseClient:
+    """Get the Supabase admin client for database operations.
+
+    Returns:
+        Configured Supabase client with service role key
+    """
+    return get_supabase_admin()
+
+
+# Supabase client dependency
+Supabase = Annotated[SupabaseClient, Depends(get_supabase)]
 
 # Supabase user dict (id, email, role, metadata)
 SupabaseUser = Annotated[dict, Depends(get_supabase_user)]

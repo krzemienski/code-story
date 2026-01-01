@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Build output (we create it during build)
+dist/
+
+# Development files
+*.log
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Docker
+Dockerfile*
+.dockerignore
+docker-compose*
+
+# Testing
+coverage/
+.nyc_output/
+
+# OS
+.DS_Store
+Thumbs.db

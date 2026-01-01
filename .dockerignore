@@ -1,0 +1,61 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv
+venv/
+ENV/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Testing
+.coverage
+htmlcov/
+tests/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.serena/
+
+# Build
+*.egg-info/
+dist/
+build/
+
+# Local
+.env
+.env.local
+*.log
+
+# Docker
+Dockerfile*
+docker-compose*
+.dockerignore
+
+# Documentation
+docs/
+docs-plans-prompts-specs/
+*.md
+!README.md
+
+# Frontend and Mobile (built separately)
+src/codestory/frontend/node_modules/
+src/codestory/mobile/node_modules/
+
+# Other
+.claude/
+.playwright-mcp/
+packages/
+plans/
+scripts/
+*.mp3

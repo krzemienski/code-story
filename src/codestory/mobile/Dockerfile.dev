@@ -1,0 +1,33 @@
+# Code Story Mobile - Development Dockerfile
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Install dependencies for native builds
+RUN apk add --no-cache git python3 make g++
+
+# Install dependencies first (for better caching)
+COPY package.json package-lock.json* yarn.lock* pnpm-lock.yaml* ./
+
+# Install based on available lock file
+RUN if [ -f pnpm-lock.yaml ]; then \
+      npm install -g pnpm && pnpm install --frozen-lockfile; \
+    elif [ -f yarn.lock ]; then \
+      yarn install --frozen-lockfile; \
+    elif [ -f package-lock.json ]; then \
+      npm ci; \
+    else \
+      npm install; \
+    fi
+
+# Install Expo CLI globally
+RUN npm install -g expo-cli @expo/ngrok
+
+# Copy application code
+COPY . .
+
+# Expose Expo ports
+EXPOSE 8081 19000 19001 19002
+
+# Run Expo dev server
+CMD ["npx", "expo", "start", "--web", "--port", "8081"]

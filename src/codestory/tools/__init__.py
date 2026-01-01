@@ -15,10 +15,47 @@ Usage:
 from claude_agent_sdk import create_sdk_mcp_server
 
 from .analysis import analyze_code_structure, analyze_dependencies, extract_patterns
-from .github import clone_repository, get_repo_info, list_repo_files
 from .intent import analyze_user_intent, extract_learning_goals, parse_preferences
 from .narrative import apply_style, create_narrative, generate_chapters
+from .repomix import (
+    analyze_packaged_repository,
+    explore_file_in_package,
+    generate_analysis_summary,
+    get_repository_artifact,
+    identify_story_components,
+    list_available_artifacts,
+    package_repository,
+)
 from .voice import generate_audio_segment, synthesize_narration, select_voice_profile
+
+# ALL_TOOLS list for validation and programmatic access
+ALL_TOOLS = [
+    # Intent tools
+    analyze_user_intent,
+    extract_learning_goals,
+    parse_preferences,
+    # Repomix tools (repository analysis via Repomix CLI)
+    package_repository,
+    analyze_packaged_repository,
+    identify_story_components,
+    generate_analysis_summary,
+    # Artifact retrieval tools (for Story Architect, Voice Director to re-read code)
+    get_repository_artifact,
+    explore_file_in_package,
+    list_available_artifacts,
+    # Analysis tools (code structure analysis)
+    analyze_code_structure,
+    analyze_dependencies,
+    extract_patterns,
+    # Narrative tools
+    create_narrative,
+    generate_chapters,
+    apply_style,
+    # Voice tools
+    generate_audio_segment,
+    synthesize_narration,
+    select_voice_profile,
+]
 
 
 def create_codestory_server():
@@ -31,11 +68,16 @@ def create_codestory_server():
             analyze_user_intent,
             extract_learning_goals,
             parse_preferences,
-            # GitHub tools
-            get_repo_info,
-            clone_repository,
-            list_repo_files,
-            # Analysis tools
+            # Repomix tools (repository analysis via Repomix CLI)
+            package_repository,
+            analyze_packaged_repository,
+            identify_story_components,
+            generate_analysis_summary,
+            # Artifact retrieval tools (for Story Architect, Voice Director to re-read code)
+            get_repository_artifact,
+            explore_file_in_package,
+            list_available_artifacts,
+            # Analysis tools (code structure analysis)
             analyze_code_structure,
             analyze_dependencies,
             extract_patterns,
@@ -52,15 +94,21 @@ def create_codestory_server():
 
 
 __all__ = [
+    "ALL_TOOLS",
     "create_codestory_server",
     # Intent
     "analyze_user_intent",
     "extract_learning_goals",
     "parse_preferences",
-    # GitHub
-    "get_repo_info",
-    "clone_repository",
-    "list_repo_files",
+    # Repomix
+    "package_repository",
+    "analyze_packaged_repository",
+    "identify_story_components",
+    "generate_analysis_summary",
+    # Artifact retrieval
+    "get_repository_artifact",
+    "explore_file_in_package",
+    "list_available_artifacts",
     # Analysis
     "analyze_code_structure",
     "analyze_dependencies",

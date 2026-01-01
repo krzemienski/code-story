@@ -207,6 +207,59 @@ export function StoryDetailPage() {
     return `${mins}:${secs.toString().padStart(2, '0')}`
   }
 
+  const handleShare = async () => {
+    if (!story) return
+
+    const shareUrl = window.location.href
+    const shareData = {
+      title: story.title,
+      text: `Check out this code story: ${story.title}`,
+      url: shareUrl,
+    }
+
+    try {
+      if (navigator.share && navigator.canShare(shareData)) {
+        await navigator.share(shareData)
+      } else {
+        // Fallback: copy to clipboard
+        await navigator.clipboard.writeText(shareUrl)
+        alert('Link copied to clipboard!')
+      }
+    } catch (err) {
+      console.error('Failed to share:', err)
+      // Fallback to clipboard
+      await navigator.clipboard.writeText(shareUrl)
+      alert('Link copied to clipboard!')
+    }
+  }
+
+  const handleDownloadAll = async () => {
+    if (!chapters.length) {
+      alert('No audio chapters available to download')
+      return
+    }
+
+    // Download each chapter with audio
+    for (const chapter of chapters) {
+      if (chapter.audio_url) {
+        try {
+          const response = await fetch(chapter.audio_url)
+          const blob = await response.blob()
+          const url = window.URL.createObjectURL(blob)
+          const a = document.createElement('a')
+          a.href = url
+          a.download = `${story?.title || 'story'}-chapter-${chapter.order}.mp3`
+          document.body.appendChild(a)
+          a.click()
+          document.body.removeChild(a)
+          window.URL.revokeObjectURL(url)
+        } catch (err) {
+          console.error(`Failed to download chapter ${chapter.order}:`, err)
+        }
+      }
+    }
+  }
+
   const getStatusBadge = (status: Story['status']) => {
     switch (status) {
       case 'complete':
@@ -463,11 +516,16 @@ export function StoryDetailPage() {
 
       {/* Actions */}
       <div className="flex gap-2 mt-6">
-        <Button variant="outline" className="flex-1">
+        <Button variant="outline" className="flex-1" onClick={handleShare}>
           <Share2 className="h-4 w-4 mr-2" />
           Share
         </Button>
-        <Button variant="outline" className="flex-1">
+        <Button
+          variant="outline"
+          className="flex-1"
+          onClick={handleDownloadAll}
+          disabled={!chapters.some(c => c.audio_url)}
+        >
           <Download className="h-4 w-4 mr-2" />
           Download All
         </Button>

@@ -1,39 +1,49 @@
 """Code Story Agent Framework.
 
-This module provides the 4-agent pipeline architecture using Claude Agent SDK:
-- Intent Agent: Conversational onboarding to understand user goals
-- Repo Analyzer Agent: Deep repository analysis with pattern detection
-- Story Architect Agent: Narrative script generation with voice direction
-- Voice Director Agent: ElevenLabs audio synthesis
+ARCHITECTURE (Services-First):
+    Frontend → FastAPI → Backend Services → Agent (creative work only)
 
-Architecture:
-    ClaudeSDKClient
-      └── ClaudeAgentOptions
-            ├── MCP Server (codestory) - 12 @tool functions
-            ├── AgentDefinitions (4 agents via Task tool)
-            └── HookMatchers (validation + audit logging)
+    Backend Services (BEFORE agents):
+        - RepositoryService: Package repo with Repomix CLI
+        - AnalysisService: Analyze code structure/patterns
+        - PipelineService: Orchestrate full flow
 
-Usage:
-    from codestory.agents import CodeStoryClient, create_codestory_options
+    Agents (CREATIVE WORK ONLY):
+        - Intent Agent: Conversational onboarding (optional)
+        - Story Architect: Narrative generation from prepared context
+        - Voice Director: ElevenLabs audio synthesis
+
+NOTE: REPO_ANALYZER_AGENT removed - its work is now done by backend services.
+Use PipelineService from codestory.services for the correct architecture.
+
+Usage (PREFERRED - Services-First):
+    from codestory.services import PipelineService, StoryGenerationRequest
+
+    pipeline = PipelineService()
+    request = StoryGenerationRequest(
+        github_url="https://github.com/owner/repo",
+        narrative_style="documentary",
+    )
+
+    async for event in pipeline.generate_story_stream(request):
+        print(event.to_dict())
+
+Usage (DEPRECATED - Direct Agent Client):
+    from codestory.agents import CodeStoryClient
 
     async with CodeStoryClient() as client:
-        async for update in client.generate_story(
-            repo_url="https://github.com/owner/repo",
-            user_intent="Understand the architecture",
-            style="documentary"
-        ):
+        async for update in client.generate_story(...):
             print(update)
 """
 
 from .base import (
-    # Agent Definitions (for Task tool delegation)
+    # Agent Definitions (Creative Only)
+    # NOTE: REPO_ANALYZER_AGENT removed - work is done by backend services
     INTENT_AGENT,
-    REPO_ANALYZER_AGENT,
     STORY_ARCHITECT_AGENT,
     VOICE_DIRECTOR_AGENT,
-    # System Prompts (for customization)
+    # System Prompts (Creative Only)
     INTENT_AGENT_PROMPT,
-    REPO_ANALYZER_PROMPT,
     STORY_ARCHITECT_PROMPT,
     VOICE_DIRECTOR_PROMPT,
     # Hooks (for extension)
@@ -43,23 +53,21 @@ from .base import (
     audit_tool_execution,
     # Options Factory
     create_codestory_options,
-    # Pipeline State
+    # Pipeline State (DEPRECATED - use codestory.services.PipelineService)
     PipelineStage,
     PipelineState,
     StoryResult,
-    # Client
+    # Client (DEPRECATED - use codestory.services.PipelineService)
     CodeStoryClient,
 )
 
 __all__ = [
-    # Agent Definitions
+    # Agent Definitions (Creative Only)
     "INTENT_AGENT",
-    "REPO_ANALYZER_AGENT",
     "STORY_ARCHITECT_AGENT",
     "VOICE_DIRECTOR_AGENT",
     # System Prompts
     "INTENT_AGENT_PROMPT",
-    "REPO_ANALYZER_PROMPT",
     "STORY_ARCHITECT_PROMPT",
     "VOICE_DIRECTOR_PROMPT",
     # Hooks
@@ -69,10 +77,10 @@ __all__ = [
     "audit_tool_execution",
     # Options Factory
     "create_codestory_options",
-    # Pipeline
+    # Pipeline (DEPRECATED)
     "PipelineStage",
     "PipelineState",
     "StoryResult",
-    # Client
+    # Client (DEPRECATED)
     "CodeStoryClient",
 ]

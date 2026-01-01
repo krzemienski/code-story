@@ -13,28 +13,24 @@ from claude_agent_sdk import tool
 
 @tool(
     name="analyze_code_structure",
-    description="Analyze the structure of a codebase. "
-    "Identifies modules, classes, functions, and their relationships.",
+    description="Analyze the structure of code. "
+    "Identifies modules, classes, functions, and their relationships. "
+    "Can analyze either a repository path or a direct code string.",
     input_schema={
-        "repo_path": "Path to the repository root",
-        "language": "Primary programming language (python, javascript, typescript, etc.)",
-        "focus_paths": "Optional list of paths to focus analysis on",
+        "repo_path": "Path to the repository root (optional if code is provided)",
+        "code": "Direct code string to analyze (optional if repo_path is provided)",
+        "language": "Programming language (python, javascript, typescript, etc.)",
+        "focus_paths": "Optional list of paths to focus analysis on (for repo_path)",
     },
 )
 async def analyze_code_structure(args: dict) -> dict:
-    """Analyze codebase structure and organization."""
+    """Analyze codebase or code snippet structure and organization."""
     repo_path = args.get("repo_path", "")
+    code = args.get("code", "")
     language = args.get("language", "python")
     focus_paths = args.get("focus_paths", [])
 
     try:
-        base_path = Path(repo_path)
-        if not base_path.exists():
-            return {
-                "content": [{"type": "text", "text": f"Path not found: {repo_path}"}],
-                "isError": True,
-            }
-
         structure = {
             "modules": [],
             "classes": [],
@@ -43,21 +39,80 @@ async def analyze_code_structure(args: dict) -> dict:
             "architecture_pattern": None,
         }
 
-        # Language-specific analysis
-        if language == "python":
-            structure = _analyze_python_structure(base_path, focus_paths)
-        elif language in ("javascript", "typescript"):
-            structure = _analyze_js_structure(base_path, focus_paths)
-        else:
-            structure["note"] = f"Basic analysis for {language}"
+        # Direct code analysis mode
+        if code:
+            if language == "python":
+                structure = _analyze_python_code(code)
+            else:
+                structure["note"] = f"Direct code analysis for {language} not yet supported"
+            return {"content": [{"type": "text", "text": json.dumps(structure, indent=2)}]}
 
-        return {"content": [{"type": "text", "text": json.dumps(structure, indent=2)}]}
+        # Repository path mode
+        if repo_path:
+            base_path = Path(repo_path)
+            if not base_path.exists():
+                return {
+                    "content": [{"type": "text", "text": f"Path not found: {repo_path}"}],
+                    "isError": True,
+                }
+
+            # Language-specific analysis
+            if language == "python":
+                structure = _analyze_python_structure(base_path, focus_paths)
+            elif language in ("javascript", "typescript"):
+                structure = _analyze_js_structure(base_path, focus_paths)
+            else:
+                structure["note"] = f"Basic analysis for {language}"
+
+            return {"content": [{"type": "text", "text": json.dumps(structure, indent=2)}]}
+
+        return {
+            "content": [{"type": "text", "text": "Error: Either repo_path or code must be provided"}],
+            "isError": True,
+        }
 
     except Exception as e:
         return {
             "content": [{"type": "text", "text": f"Analysis error: {e!s}"}],
             "isError": True,
         }
+
+
+def _analyze_python_code(code: str) -> dict:
+    """Analyze a Python code string directly."""
+    structure = {
+        "modules": [],
+        "classes": [],
+        "functions": [],
+        "entry_points": [],
+        "architecture_pattern": None,
+    }
+
+    try:
+        tree = ast.parse(code)
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef):
+                structure["classes"].append(
+                    {
+                        "name": node.name,
+                        "module": "<snippet>",
+                        "methods": [
+                            n.name
+                            for n in node.body
+                            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+                        ],
+                    }
+                )
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.col_offset == 0:
+                structure["functions"].append(
+                    {"name": node.name, "module": "<snippet>"}
+                )
+
+    except SyntaxError as e:
+        structure["error"] = f"Syntax error: {e}"
+
+    return structure
 
 
 def _analyze_python_structure(base_path: Path, focus_paths: list) -> dict:

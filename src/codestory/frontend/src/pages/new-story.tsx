@@ -14,6 +14,7 @@ import {
   MessageCircle,
   Bot,
   User,
+  Mic,
 } from 'lucide-react'
 import {
   Button,
@@ -62,7 +63,15 @@ export function NewStoryPage() {
 
   // Story config - using actual enum values
   const [style, setStyle] = useState<NarrativeStyle>('storytelling')
+  const [voice, setVoice] = useState<'rachel' | 'bella' | 'daniel'>('rachel')
   const [generating, setGenerating] = useState(false)
+
+  // Voice profiles matching backend
+  const voiceProfiles = {
+    rachel: { name: 'Rachel', description: 'Clear and technical', style: 'Professional' },
+    bella: { name: 'Bella', description: 'Warm and conversational', style: 'Friendly' },
+    daniel: { name: 'Daniel', description: 'Calm and educational', style: 'Instructor' },
+  }
 
   // Scroll to bottom on new messages
   useEffect(() => {
@@ -230,6 +239,7 @@ export function NewStoryPage() {
         },
         body: JSON.stringify({
           conversation: messages.map((m) => ({ role: m.role, content: m.content })),
+          voice_profile: voice,
         }),
       })
 
@@ -406,6 +416,38 @@ export function NewStoryPage() {
                   <span className="text-xs opacity-80 mt-1">
                     {styleDescriptions[s].split(' ').slice(0, 3).join(' ')}...
                   </span>
+                </Button>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Step 4: Voice Selection */}
+        <Card className={!repoValid ? 'opacity-50 pointer-events-none' : ''}>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Badge variant="outline">4</Badge>
+              <Mic className="h-5 w-5" />
+              Select Voice
+            </CardTitle>
+            <CardDescription>
+              Choose the voice for your audio narration
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              {(Object.entries(voiceProfiles) as [keyof typeof voiceProfiles, typeof voiceProfiles[keyof typeof voiceProfiles]][]).map(([key, profile]) => (
+                <Button
+                  key={key}
+                  variant={voice === key ? 'default' : 'outline'}
+                  className="h-auto py-4 flex flex-col items-start text-left"
+                  onClick={() => setVoice(key)}
+                >
+                  <span className="font-medium">{profile.name}</span>
+                  <span className="text-xs opacity-80">{profile.description}</span>
+                  <Badge variant="secondary" className="mt-2 text-xs">
+                    {profile.style}
+                  </Badge>
                 </Button>
               ))}
             </div>

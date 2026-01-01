@@ -1,0 +1,288 @@
+# Production values for code-story Helm chart
+# This file contains production-ready configurations
+
+global:
+  imagePullSecrets:
+    - name: ghcr-credentials
+
+# API Backend
+api:
+  replicaCount: 3
+
+  image:
+    repository: ghcr.io/your-org/code-story-api
+    tag: ""  # Uses Chart.appVersion
+    pullPolicy: IfNotPresent
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 2
+
+  ingress:
+    enabled: true
+    className: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+      nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+      nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+      nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    hosts:
+      - host: api.codestory.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: api-tls
+        hosts:
+          - api.codestory.example.com
+
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/component: api
+            topologyKey: kubernetes.io/hostname
+
+# Celery Worker
+celeryWorker:
+  replicaCount: 3
+  concurrency: 4
+  queues:
+    - default
+    - stories
+    - analysis
+
+  image:
+    repository: ghcr.io/your-org/code-story-api
+    tag: ""
+    pullPolicy: IfNotPresent
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 8
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/component: celery-worker
+            topologyKey: kubernetes.io/hostname
+
+# Celery Beat
+celeryBeat:
+  enabled: true
+
+  image:
+    repository: ghcr.io/your-org/code-story-api
+    tag: ""
+    pullPolicy: IfNotPresent
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+# Web Frontend
+web:
+  replicaCount: 2
+  apiUrl: "https://api.codestory.example.com"
+
+  image:
+    repository: ghcr.io/your-org/code-story-web
+    tag: ""
+    pullPolicy: IfNotPresent
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 70
+
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+  ingress:
+    enabled: true
+    className: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+      nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    hosts:
+      - host: codestory.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: web-tls
+        hosts:
+          - codestory.example.com
+
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/component: web
+            topologyKey: kubernetes.io/hostname
+
+# Database migrations
+migrations:
+  enabled: true
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 3
+
+# PostgreSQL (Bitnami subchart)
+postgresql:
+  enabled: true
+  auth:
+    database: codestory
+    username: codestory
+    existingSecret: code-story-secrets
+    secretKeys:
+      adminPasswordKey: postgresql-password
+      userPasswordKey: postgresql-password
+
+  primary:
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        cpu: 2000m
+        memory: 4Gi
+
+    persistence:
+      enabled: true
+      size: 50Gi
+      storageClass: ""  # Use cluster default
+
+    podAntiAffinity: soft
+
+  readReplicas:
+    replicaCount: 2
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: 1000m
+        memory: 2Gi
+
+    persistence:
+      enabled: true
+      size: 50Gi
+
+  metrics:
+    enabled: true
+
+# Redis (Bitnami subchart)
+redis:
+  enabled: true
+  auth:
+    enabled: true
+    existingSecret: code-story-secrets
+    existingSecretPasswordKey: redis-password
+
+  master:
+    resources:
+      requests:
+        cpu: 250m
+        memory: 256Mi
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+
+    persistence:
+      enabled: true
+      size: 8Gi
+
+  replica:
+    replicaCount: 2
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+    persistence:
+      enabled: true
+      size: 8Gi
+
+  metrics:
+    enabled: true
+
+# S3 Storage
+s3:
+  bucket: "codestory-production"
+  region: "us-east-1"
+  # endpoint: ""  # Leave empty for AWS S3
+
+# Supabase (external service)
+supabase:
+  url: "https://your-project.supabase.co"
+
+# Service Account
+serviceAccount:
+  create: true
+  name: ""
+  annotations:
+    # For AWS IRSA
+    # eks.amazonaws.com/role-arn: arn:aws:iam::ACCOUNT:role/codestory-role
+
+# Network Policies
+networkPolicy:
+  enabled: true
+
+# Secrets (use external secrets manager in production)
+secrets:
+  existingSecret: "code-story-secrets"
+  # In production, use external-secrets, sealed-secrets, or vault
+  # Do not store actual secret values in values files

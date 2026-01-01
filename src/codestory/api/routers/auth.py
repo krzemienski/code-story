@@ -7,7 +7,7 @@ Uses JWT tokens with access/refresh token pattern.
 from datetime import datetime, timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, status
 from jose import jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel, EmailStr, Field
@@ -33,7 +33,7 @@ class RegisterRequest(BaseModel):
 
     email: EmailStr
     password: str = Field(..., min_length=8, max_length=128)
-    name: str = Field(..., min_length=1, max_length=100)
+    # Note: 'name' not stored in User model - kept for API compatibility
 
 
 class LoginRequest(BaseModel):
@@ -61,11 +61,11 @@ class RefreshRequest(BaseModel):
 class UserResponse(BaseModel):
     """User info response."""
 
-    id: str
+    id: int
     email: str
-    name: str
     is_active: bool
-    is_admin: bool
+    is_superuser: bool
+    subscription_tier: str
     created_at: datetime
 
     class Config:
@@ -156,10 +156,9 @@ async def register(
     # Create user
     user = User(
         email=request.email,
-        password_hash=hash_password(request.password),
-        name=request.name,
+        hashed_password=hash_password(request.password),
         is_active=True,
-        is_admin=False,
+        is_superuser=False,
     )
     db.add(user)
     await db.commit()
@@ -337,8 +336,8 @@ async def logout(
 
 @router.post("/change-password", response_model=MessageResponse)
 async def change_password(
-    current_password: str,
-    new_password: Annotated[str, Field(min_length=8, max_length=128)],
+    current_password: Annotated[str, Body()],
+    new_password: Annotated[str, Body(min_length=8, max_length=128)],
     user: CurrentUser,
     db: DBSession,
 ) -> MessageResponse:

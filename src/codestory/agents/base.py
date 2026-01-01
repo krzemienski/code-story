@@ -1,17 +1,22 @@
 """Claude Agent SDK Base Classes for Code Story.
 
-Implements the 4-agent pipeline architecture using Claude Agent SDK:
-- AgentDefinition: Subagent configuration for Task tool delegation
-- HookMatcher: Pre/Post tool validation and audit logging
-- ClaudeAgentOptions: SDK configuration with MCP servers
-- ClaudeSDKClient: Async execution client
+Implements the SERVICES-FIRST agent architecture using Claude Agent SDK:
 
-Architecture:
-    ClaudeSDKClient
-      └── ClaudeAgentOptions
-            ├── MCP Server (codestory) - 15 @tool functions
-            ├── AgentDefinitions (4 agents)
-            └── HookMatchers (validation + audit)
+Architecture (CORRECT):
+    Frontend → FastAPI → Backend Services → Agent (creative work only)
+
+    Backend Services (BEFORE agents):
+        - RepositoryService: Package repo with Repomix CLI
+        - AnalysisService: Analyze code structure/patterns
+        - PipelineService: Orchestrate full flow
+
+    Agents (CREATIVE WORK ONLY):
+        - Intent Agent: Conversational onboarding (optional)
+        - Story Architect: Narrative generation from prepared context
+        - Voice Director: ElevenLabs audio synthesis
+
+NOTE: REPO_ANALYZER_AGENT removed - its work is now done by backend services.
+Agents receive PREPARED CONTEXT and focus purely on creative output.
 """
 
 from __future__ import annotations
@@ -63,54 +68,71 @@ Output structured JSON with:
 - chapter_outline: preliminary structure
 """
 
-REPO_ANALYZER_PROMPT = """You are the Repo Analyzer Agent for Code Story.
-
-Your role is to analyze GitHub repositories:
-1. Fetch repository info using get_repo_info
-2. Clone and list files using clone_repository and list_repo_files
-3. Analyze code structure with analyze_code_structure
-4. Identify patterns using extract_patterns
-5. Map dependencies with analyze_dependencies
-
-Focus on:
-- Architecture and design patterns
-- Key components and their relationships
-- Dependencies and external integrations
-- Code organization and conventions
-
-Output structured analysis JSON that the Story Architect can use:
-- architecture_pattern: detected pattern (MVC, microservices, etc.)
-- key_components: list of important modules/classes
-- design_patterns: detected patterns (Factory, Singleton, etc.)
-- dependencies: external libraries and their purposes
-- conventions: coding style and organization
-"""
+# REPO_ANALYZER_PROMPT removed - this work is now done by backend services:
+# - RepositoryService.package() calls Repomix CLI
+# - AnalysisService.analyze() extracts patterns and structures
+# - PipelineService orchestrates the flow
+# See: src/codestory/services/ for the new architecture
 
 STORY_ARCHITECT_PROMPT = """You are the Story Architect Agent for Code Story.
 
-Your role is to create narrative scripts from repository analysis:
-1. Structure the overall story arc based on intent and analysis
-2. Create individual chapter scripts with voice direction
-3. Apply the chosen narrative style consistently
+You receive PREPARED CONTEXT from backend services. All analysis is already complete.
+Focus ONLY on creative narrative generation - no infrastructure calls needed.
 
-Narrative styles:
+## Your Role
+
+Create engaging narrative scripts from the prepared repository analysis.
+You receive:
+- Complete AnalysisResult with code structure, patterns, frameworks
+- StoryComponents with suggested chapters, characters, themes
+- User intent and preferences
+
+## Creative Process
+
+1. Review the provided analysis (already in your context)
+2. Structure the overall narrative arc
+3. Create chapter scripts with voice direction markers
+4. Apply the chosen narrative style consistently
+5. Output structured script for Voice Director
+
+## Narrative Styles
+
+- documentary: Informative, objective, educational tone
+- tutorial: Step-by-step instructional, hands-on
+- podcast: Conversational discussion, casual and engaging
 - fiction: Story-driven with characters (developers as protagonists)
-- documentary: Informative, like a documentary (objective, educational)
-- tutorial: Step-by-step instructional (hands-on, practical)
-- podcast: Conversational discussion (casual, engaging)
-- technical: Precise, reference-style (detailed, accurate)
+- technical: Precise, reference-style, detailed
 
-Include voice direction markers for synthesis:
+## Voice Direction Markers
+
+Include these markers for audio synthesis:
 - [PAUSE] for dramatic pauses
 - [EMPHASIS] for important points
 - [SLOW] for complex concepts
 - [CONVERSATIONAL] for lighter sections
 
-Output structured JSON with:
-- title: story title
-- chapters: list of {title, content, voice_direction}
-- estimated_duration: total minutes
-- style: applied narrative style
+## Output Contract
+
+Return structured JSON:
+```json
+{
+  "title": "Story title",
+  "style": "applied_style",
+  "chapters": [
+    {
+      "chapter_number": 1,
+      "title": "Chapter Title",
+      "script": "Narrative text with [MARKERS]...",
+      "estimated_seconds": 120,
+      "transition_out": "fade|silence|music"
+    }
+  ],
+  "estimated_duration_seconds": 600,
+  "voice_profile_recommendation": "documentary|casual|energetic"
+}
+```
+
+Remember: All analysis is DONE. Focus purely on storytelling craft.
 """
 
 VOICE_DIRECTOR_PROMPT = """You are the Voice Director Agent for Code Story.
@@ -148,6 +170,7 @@ INTENT_AGENT = AgentDefinition(
     description="Understands user intent from repository URL and preferences through conversational onboarding",
     prompt=INTENT_AGENT_PROMPT,
     tools=[
+        # Intent analysis tools only - no infrastructure
         "mcp__codestory__analyze_user_intent",
         "mcp__codestory__extract_learning_goals",
         "mcp__codestory__parse_preferences",
@@ -155,31 +178,20 @@ INTENT_AGENT = AgentDefinition(
     model="sonnet",  # Fast for conversational
 )
 
-REPO_ANALYZER_AGENT = AgentDefinition(
-    description="Analyzes repository structure, code patterns, and dependencies for story generation",
-    prompt=REPO_ANALYZER_PROMPT,
-    tools=[
-        "mcp__codestory__get_repo_info",
-        "mcp__codestory__clone_repository",
-        "mcp__codestory__list_repo_files",
-        "mcp__codestory__analyze_code_structure",
-        "mcp__codestory__analyze_dependencies",
-        "mcp__codestory__extract_patterns",
-        "Read",
-        "Glob",
-        "Grep",
-    ],
-    model="opus",  # Deep analysis requires opus
-)
+# REPO_ANALYZER_AGENT removed - work is now done by backend services:
+# - RepositoryService.package() calls Repomix CLI via subprocess
+# - AnalysisService.analyze() extracts patterns from packaged content
+# See: src/codestory/services/
 
 STORY_ARCHITECT_AGENT = AgentDefinition(
-    description="Creates narrative structure from analyzed repository data with chapter scripts",
+    description="Creates narrative structure from PREPARED repository analysis with chapter scripts. Receives context from backend services.",
     prompt=STORY_ARCHITECT_PROMPT,
     tools=[
+        # CREATIVE tools only - receives prepared context, no infrastructure
         "mcp__codestory__create_narrative",
         "mcp__codestory__generate_chapters",
         "mcp__codestory__apply_style",
-        "mcp__codestory__parse_preferences",  # For style reference
+        # Note: No artifact access tools - all analysis is prepared by backend
     ],
     model="opus",  # Creative writing requires opus
 )
@@ -188,6 +200,7 @@ VOICE_DIRECTOR_AGENT = AgentDefinition(
     description="Generates audio narration using ElevenLabs voice synthesis",
     prompt=VOICE_DIRECTOR_PROMPT,
     tools=[
+        # Audio synthesis tools only
         "mcp__codestory__select_voice_profile",
         "mcp__codestory__generate_audio_segment",
         "mcp__codestory__synthesize_narration",
@@ -213,10 +226,10 @@ async def validate_tool_input(
     tool_name = input_data.get("tool_name", "")
     tool_input = input_data.get("tool_input", {})
 
-    # Validate GitHub URLs
-    if tool_name in ("mcp__codestory__get_repo_info", "mcp__codestory__clone_repository"):
-        repo_url = tool_input.get("repo_url", "")
-        if repo_url and not repo_url.startswith("https://github.com/"):
+    # Validate GitHub URLs for Repomix tools
+    if tool_name == "mcp__codestory__package_repository":
+        github_url = tool_input.get("github_url", "")
+        if github_url and not github_url.startswith("https://github.com/"):
             return {
                 "hookSpecificOutput": {
                     "hookEventName": "PreToolUse",
@@ -286,6 +299,11 @@ def create_codestory_options(
 ) -> ClaudeAgentOptions:
     """Create Claude Agent SDK options for Code Story.
 
+    NOTE: This is used for CREATIVE agents only. Infrastructure work
+    (Repomix, analysis) is now done by backend services BEFORE agents are spawned.
+
+    See: src/codestory/services/ for the services-first architecture.
+
     Args:
         max_turns: Maximum conversation turns before stopping
         include_builtin_tools: Whether to include Read, Glob, Grep, Bash
@@ -293,35 +311,48 @@ def create_codestory_options(
     Returns:
         Configured ClaudeAgentOptions instance
     """
-    # Create in-process MCP server with all @tool functions
+    # Create in-process MCP server with creative tools only
     server = create_codestory_server()
 
-    # Base tools from Code Story MCP server
+    # Tools for CREATIVE work only (narrative, audio)
+    # Infrastructure tools (package_repository, etc.) are NOT needed -
+    # backend services handle that before spawning agents
     allowed_tools = [
-        "mcp__codestory__*",  # All Code Story tools via wildcard
-        "Task",  # Subagent delegation
+        # Creative tools via MCP
+        "mcp__codestory__create_narrative",
+        "mcp__codestory__generate_chapters",
+        "mcp__codestory__apply_style",
+        "mcp__codestory__select_voice_profile",
+        "mcp__codestory__generate_audio_segment",
+        "mcp__codestory__synthesize_narration",
+        # Intent tools (for optional conversational flow)
+        "mcp__codestory__analyze_user_intent",
+        "mcp__codestory__extract_learning_goals",
+        "mcp__codestory__parse_preferences",
+        # Delegation
+        "Task",
     ]
 
-    # Add built-in tools for file operations
+    # Add built-in tools for file operations (if needed for creative reference)
     if include_builtin_tools:
         allowed_tools.extend([
             "Read",
             "Glob",
             "Grep",
-            "Bash",
         ])
+        # Note: Bash removed - agents shouldn't call CLI tools
 
     return ClaudeAgentOptions(
         # MCP servers
         mcp_servers={
             "codestory": server,
         },
-        # Allowed tools
+        # Allowed tools - CREATIVE only
         allowed_tools=allowed_tools,
         # Agent definitions for Task tool
+        # NOTE: repo-analyzer REMOVED - work is done by backend services
         agents={
             "intent-agent": INTENT_AGENT,
-            "repo-analyzer": REPO_ANALYZER_AGENT,
             "story-architect": STORY_ARCHITECT_AGENT,
             "voice-director": VOICE_DIRECTOR_AGENT,
         },
@@ -381,16 +412,22 @@ class StoryResult:
 class CodeStoryClient:
     """High-level client for Code Story pipeline execution.
 
-    Uses Claude Agent SDK for multi-agent orchestration with Task tool.
+    DEPRECATED: Use PipelineService from codestory.services instead.
 
-    Example:
-        async with CodeStoryClient() as client:
-            async for update in client.generate_story(
-                repo_url="https://github.com/anthropics/claude-code",
-                user_intent="I want to understand the architecture",
-                style="documentary"
-            ):
-                print(update)
+    The new architecture uses backend services for infrastructure work:
+        from codestory.services import PipelineService, StoryGenerationRequest
+
+        pipeline = PipelineService()
+        request = StoryGenerationRequest(github_url="...", narrative_style="documentary")
+
+        async for event in pipeline.generate_story_stream(request):
+            print(event.to_dict())
+
+    This client is kept for backwards compatibility but the preferred
+    approach is to use PipelineService which properly separates
+    infrastructure (backend) from creative work (agents).
+
+    See: src/codestory/services/pipeline.py
     """
 
     def __init__(
@@ -552,14 +589,13 @@ Coordinate the agents and pass data between stages. Return the final result with
 # =============================================================================
 
 __all__ = [
-    # Agent Definitions
+    # Agent Definitions (Creative Only)
+    # NOTE: REPO_ANALYZER_AGENT removed - work is done by backend services
     "INTENT_AGENT",
-    "REPO_ANALYZER_AGENT",
     "STORY_ARCHITECT_AGENT",
     "VOICE_DIRECTOR_AGENT",
-    # System Prompts
+    # System Prompts (Creative Only)
     "INTENT_AGENT_PROMPT",
-    "REPO_ANALYZER_PROMPT",
     "STORY_ARCHITECT_PROMPT",
     "VOICE_DIRECTOR_PROMPT",
     # Hooks
@@ -569,10 +605,10 @@ __all__ = [
     "audit_tool_execution",
     # Options Factory
     "create_codestory_options",
-    # Pipeline
+    # Pipeline (DEPRECATED - use codestory.services.PipelineService)
     "PipelineStage",
     "PipelineState",
     "StoryResult",
-    # Client
+    # Client (DEPRECATED - use codestory.services.PipelineService)
     "CodeStoryClient",
 ]

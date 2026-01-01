@@ -192,3 +192,7 @@ def generate_api_key() -> str:
         A secure random API key string with 'cs_' prefix (32 bytes, hex encoded)
     """
     return f"cs_{secrets.token_hex(32)}"
+
+
+# Alias for backward compatibility with common naming convention
+get_password_hash = hash_password
